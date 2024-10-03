@@ -3,6 +3,7 @@ import ChartComponent from './ChartComponent';
 import CoinSelector from './CoinSelector';
 import TimeframeSelector from './TimeframeSelector';
 
+
 const App = () => {
   const coins = ['ethusdt', 'bnbusdt', 'dotusdt'];
   const [symbol, setSymbol] = useState(coins[0]);
