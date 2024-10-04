@@ -1,87 +1,109 @@
-import React, { useEffect, useRef } from 'react';
-import { Chart, registerables } from 'chart.js';
-import 'chartjs-chart-financial'; // Import financial charting library
-import dayjs from 'dayjs';
-import 'chartjs-adapter-date-fns'; // or 'chartjs-adapter-dayjs' if preferred
+import { useEffect, useState } from 'react';
+import { Line } from 'react-chartjs-2';
+import { Chart as ChartJS, registerables } from 'chart.js';
 
-// Register necessary components
-Chart.register(...registerables);
-import { CandlestickController, CandlestickElement } from 'chartjs-chart-financial';
-Chart.register(CandlestickController, CandlestickElement);
+ChartJS.register(...registerables);
 
-const ChartComponent = ({ data }) => {
-  const chartRef = useRef(null);
-  const chartInstanceRef = useRef(null);
+const symbols = {
+    ETH: 'ethusdt',
+    BNB: 'bnbusdt',
+    DOT: 'dotusdt',
+};
 
-  useEffect(() => {
-    // Prepare the chart data by converting time and parsing prices
-    const chartData = data.map(item => ({
-      t: dayjs(item.time).toDate(), // Convert time to Date object using Day.js
-      o: parseFloat(item.open),
-      h: parseFloat(item.high),
-      l: parseFloat(item.low),
-      c: parseFloat(item.close),
-    }));
+const intervals = ['1m', '3m', '5m'];
 
-    // Destroy previous chart instance if it exists
-    if (chartInstanceRef.current) {
-      chartInstanceRef.current.destroy();
-    }
+const ChartComponent = () => {
+    const [selectedCoin, setSelectedCoin] = useState(symbols.ETH);
+    const [selectedInterval, setSelectedInterval] = useState(intervals[0]);
+    const [candlestickData, setCandlestickData] = useState({});
+    const [chartData, setChartData] = useState({ datasets: [] });
 
-    // Create a new chart instance
-    chartInstanceRef.current = new Chart(chartRef.current, {
-      type: 'candlestick',
-      data: {
-        datasets: [{
-          label: 'Candlestick Chart',
-          data: chartData,
-          borderColor: 'rgba(75, 192, 192, 1)',
-          backgroundColor: 'rgba(75, 192, 192, 0.2)',
-        }],
-      },
-      options: {
-        responsive: true,
-        scales: {
-          x: {
-            type: 'time',
-            time: {
-              unit: 'minute',
-              tooltipFormat: 'PPpp', // Format for tooltips
-              displayFormats: {
-                minute: 'HH:mm',
-              },
-            },
-          },
-          y: {
-            beginAtZero: false,
-          },
-        },
-        plugins: {
-          tooltip: {
-            callbacks: {
-              label: function(context) {
-                return [
-                  `Open: ${context.raw.o}`,
-                  `High: ${context.raw.h}`,
-                  `Low: ${context.raw.l}`,
-                  `Close: ${context.raw.c}`,
-                ];
-              },
-            },
-          },
-        },
-      },
-    },[data]);
+    useEffect(() => {
+        const fetchDataFromLocalStorage = () => {
+            const storedData = localStorage.getItem(selectedCoin + selectedInterval);
+            if (storedData) {
+                setCandlestickData(JSON.parse(storedData));
+                updateChartData(JSON.parse(storedData));
+            }
+        };
 
-    // Clean up the chart instance on unmount
-    return () => {
-      if (chartInstanceRef.current) {
-        chartInstanceRef.current.destroy();
-      }
+        fetchDataFromLocalStorage();
+
+        const ws = new WebSocket(`wss://stream.binance.com:9443/ws/${selectedCoin}@kline_${selectedInterval}`);
+
+        ws.onmessage = (event) => {
+            const message = JSON.parse(event.data);
+            const kline = message.k;
+
+            if (kline && kline.x) {
+                const newData = {
+                    time: new Date(kline.t).toLocaleTimeString(),
+                    open: parseFloat(kline.o),
+                    high: parseFloat(kline.h),
+                    low: parseFloat(kline.l),
+                    close: parseFloat(kline.c),
+                };
+
+                const updatedData = { ...candlestickData, [newData.time]: newData };
+                setCandlestickData(updatedData);
+                localStorage.setItem(selectedCoin + selectedInterval, JSON.stringify(updatedData));
+                updateChartData(updatedData);
+            }
+        };
+
+        return () => ws.close();
+    }, [selectedCoin, selectedInterval]);
+
+    const updateChartData = (data) => {
+        const labels = Object.keys(data);
+        const prices = labels.map((time) => data[time]);
+
+        const newChartData = {
+            labels,
+            datasets: [
+                {
+                    label: 'Candlestick Chart',
+                    data: prices.map((item) => ({
+                        x: item.time,
+                        y: [item.open, item.high, item.low, item.close],
+                    })),
+                    borderColor: 'rgba(75, 192, 192, 1)',
+                    backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                },
+            ],
+        };
+
+        setChartData(newChartData);
     };
-  }, [data]);
 
-  return <canvas ref={chartRef} />;
+    return (
+        <div className="min-h-screen bg-gray-100 flex flex-col items-center justify-center p-5">
+            <h1 className="text-3xl mb-5 ">Cryptocurrency Live Candlestick Chart</h1>
+            <div className="mb-4">
+                <select
+                    className="p-2 border rounded"
+                    onChange={(e) => setSelectedCoin(e.target.value)}
+                    value={selectedCoin}
+                >
+                    <option value={symbols.ETH}>ETH/USDT</option>
+                    <option value={symbols.BNB}>BNB/USDT</option>
+                    <option value={symbols.DOT}>DOT/USDT</option>
+                </select>
+                <select
+                    className="p-2 border rounded ml-4"
+                    onChange={(e) => setSelectedInterval(e.target.value)}
+                    value={selectedInterval}
+                >
+                    {intervals.map((interval) => (
+                        <option key={interval} value={interval}>
+                            {interval}
+                        </option>
+                    ))}
+                </select>
+            </div>
+            <Line data={chartData} options={{ responsive: true }} />
+        </div>
+    );
 };
 
 export default ChartComponent;
